@@ -1,0 +1,32 @@
+[Version]
+Signature="$Windows NT$"
+
+[Certsrv_Server]
+RenewalKeyLength=2048
+RenewalValidityPeriod=Years
+RenewalValidityPeriodUnits=10
+CRLPeriod=months
+CRLPeriodUnits=14
+LoadDefaultTemplates=0
+AlternateSignatureAlgorithm=0
+
+[CRLDistributionPoint]
+[AuthorityInformationAccess]
+
+[PolicyStatementExtension]
+Policies=LegalPolicy, LimitedUsePolicy
+
+[LegalPolicy]
+OID=1.3.6.1.4.1.311.21.43
+URL="http://[FQDN]/pki/Policy/USLegalPolicy.asp"
+Notice=”Legal policies can be found in the referring URL”
+
+[LimitedUsePolicy]
+OID=1.3.6.1.4.1.311.21.47
+URL="http://[FQDN]/pki/Policy/USLimitedUsePolicy.asp"
+Notice=“Limited use policies can be found in the referring URL”
+
+[BasicConstraintsExtension]
+PathLength=1
+Critical=True
+IsCA=True
