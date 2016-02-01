@@ -1,4 +1,35 @@
-﻿param (
+﻿<#
+.Synopsis
+   Deploys a two-tier PKI hierarchy with offline root
+.DESCRIPTION
+   This script will install and configure a two-tier PKI hierarchy complete with offline root.  Becuase of the nature of an offlineroot, the script will be run seperately on each node.
+.EXAMPLE
+   Deploy-pki.ps1 –role root –FQDN “pki.contoso.com” –CAName “Contoso Inc.” –DomainDN “DC=contoso,DC=com”
+
+   Run this on the box you want to be your “root server”.  It should not be domain joined so it can remain off forever and a day.  When done, it will create a zip file on your C: drive it will use for later portions called “root-certificates.zip”.  Copy that to your Enterprise CA in the root of C: again.
+.EXAMPLE
+   Deploy-pki.ps1 –role issue –FQDN “pki.contoso.com” –CAName “Contoso Inc. Enterprise CA” -DeployZIPAD
+
+   Similar commands as the first, only this time say “issue” and we add “-deployzipad” to tell the script to look for that file created earlier and publish the root certificates to AD.  Remove that last switch if you need to re-run the server build for any reason.
+
+   When done … you will have a certificate request file in your C:\ drive this time.  You’ve got to take that to your root server and issue a cert based on the request.  One you have a cert, you can import the cert into the server using cert authority GUI.  Hurray.
+.EXAMPLE
+   Deploy-pki.ps1 –role issue –FQDN “pki.contoso.com” –CAName “Contoso Inc. Enterprise CA” –DeployZIP –IssueStep 2
+
+   Two new switches here.  “–IssueStep 2” tells the script that the cert was installed and it’s safe to finish configuring settings.  “–DeployZip” tells it to take those certs on the root and host them on the local IIS (so you can shut down the root server).  Once this finishes your PKI structure is up … just make sure you add a A-Record for that “pki.contoso.com” so it can be resolved.  You can also now delete those request files and zip files on your C:\
+.INPUTS
+   Inputs to this cmdlet (if any)
+.OUTPUTS
+   root-certificates.zip - this file contains the public key and current CRL file to be imported into AD with the DeployZipAD switch.
+.NOTES
+   General notes
+.COMPONENT
+   The component this cmdlet belongs to
+.FUNCTIONALITY
+   The functionality that best describes this cmdlet
+#>
+
+param (
     [Parameter(Mandatory=$true)][String][ValidateSet("Root","Issue")]$Role,
     [Parameter(Mandatory=$true)][String]$FQDN = "pki.contoso.com",
     [Parameter(Mandatory=$true)][String]$CAName,
