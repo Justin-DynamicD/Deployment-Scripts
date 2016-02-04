@@ -54,11 +54,7 @@ If ($IssueStep -eq 1) {
         Root {$catemplate="Root-CAPolicy.inf"}
         }
 
-    #Generate CAPolicy.inf from templates
-    Write-Verbose "Creating capolicy.inf file ..."
-    (Get-Content $catemplate).replace('[FQDN]',$FQDN) | Set-Content $env:SystemRoot\CAPolicy.inf -force
-
-
+    #Generate CAPolicy.inf from templates    Write-Verbose "Creating capolicy.inf file ..."    (Get-Content $catemplate).replace('[FQDN]',$FQDN) | Set-Content $env:SystemRoot\CAPolicy.inf -force
     #Install and configure core features
     Write-Verbose "Installing required features..."
     Switch ($Role) {
@@ -89,16 +85,11 @@ If ($Role -eq "Root") {
     Invoke-Expression $cmd | Write-Verbose
 
     #Configure the CRL Validity Period
-    Write-Verbose "Configure the CRL Validity Period..."
-    $cmd = 'certutil.exe -setreg ca\ValidityPeriodUnits 20'
-    Invoke-Expression $cmd | Write-Verbose
-    $cmd = 'certutil.exe -setreg ca\ValidityPeriod "Years"'
-    Invoke-Expression $cmd | Write-Verbose
+    Write-Verbose "Configure the CRL Validity Period..."    $cmd = 'certutil.exe -setreg ca\ValidityPeriodUnits 10'    Invoke-Expression $cmd | Write-Verbose    $cmd = 'certutil.exe -setreg ca\ValidityPeriod "Years"'    Invoke-Expression $cmd | Write-Verbose
 
     #Enable Auditing
     Write-Verbose "Enable Auditing ..."
-    $cmd = 'certutil.exe -setreg ca\AuditFilter 127'
-    Invoke-Expression $cmd | Write-Verbose
+    $cmd = 'certutil.exe -setreg ca\AuditFilter 127'    Invoke-Expression $cmd | Write-Verbose
 
     #Resart Services to apply
     write-verbose "Restarting services to apply changes ..."
@@ -106,8 +97,7 @@ If ($Role -eq "Root") {
 
     #Exporting Information
     Write-Verbose "Exporting Information..."
-    $cmd = 'certutil.exe -CRL'
-    Invoke-Expression $cmd | Write-Verbose
+    $cmd = 'certutil.exe -CRL'    Invoke-Expression $cmd | Write-Verbose
 
     #Create a ZIP of certificate files if switch is set
     IF ($CreateDeploymentZIP) {
@@ -135,14 +125,11 @@ If (($DeployZIPAD) -and ($env:Userdomain -ne $env:COMPUTERNAME)) {
     $certs = (Get-ChildItem -Path $Destination\* -Include *.crt).Name
     $CRLs = (Get-ChildItem -Path $Destination\* -Include *.crl).Name
     For-each $Certfile in $certs {
-        $cmd = 'certutil.exe -dspublish -f "'+$Destination+'\'+$certfile+'" RootCA'
-        Invoke-Expression $cmd | Write-Verbose
-        $cmd = 'certutil.exe -addstore -f root "'+$Destination+'\'+$certfile+'"'
-        Invoke-Expression $cmd | Write-Verbose
+        $cmd = 'certutil.exe -dspublish -f "'+$Destination+'\'+$certfile+'" RootCA'        Invoke-Expression $cmd | Write-Verbose
+        $cmd = 'certutil.exe -addstore -f root "'+$Destination+'\'+$certfile+'"'        Invoke-Expression $cmd | Write-Verbose
         }
      For-each $CRLfile in $CRLs {
-        $cmd = 'certutil.exe -addstore -f root "'+$Destination+'\'+$CRLfile+'"'
-        Invoke-Expression $cmd | Write-Verbose
+        $cmd = 'certutil.exe -addstore -f root "'+$Destination+'\'+$CRLfile+'"'        Invoke-Expression $cmd | Write-Verbose
         }
 
     #cleanup temp directory
@@ -183,9 +170,7 @@ If (($Role -eq "Issue") -and ($IssueStep -eq 2)) {
         }
 
     #Set Hash Algorithm to SHA256
-    Write-Verbose "Set Hash Algorithm to SHA256..."
-    $cmd = 'certutil.exe -setreg ca\csp\CNGHashAlgorithm SHA256'
-    Invoke-Expression $cmd | Write-Verbose
+    Write-Verbose "Set Hash Algorithm to SHA256..."    $cmd = 'certutil.exe -setreg ca\csp\CNGHashAlgorithm SHA256'    Invoke-Expression $cmd | Write-Verbose
 
     #Configure the CRL, CDP and CA Publication URLs
     Write-Verbose "Setting publication URLs..."
@@ -195,16 +180,11 @@ If (($Role -eq "Issue") -and ($IssueStep -eq 2)) {
     Invoke-Expression $cmd | Write-Verbose
 
     #Configure the CRL Validity Period
-    Write-Verbose "Configure the CRL Validity Period..."
-    $cmd = 'certutil.exe -setreg ca\ValidityPeriodUnits 10'
-    Invoke-Expression $cmd | Write-Verbose
-    $cmd = 'certutil.exe -setreg ca\ValidityPeriod "Years"'
-    Invoke-Expression $cmd | Write-Verbose
+    Write-Verbose "Configure the CRL Validity Period..."    $cmd = 'certutil.exe -setreg ca\ValidityPeriodUnits 10'    Invoke-Expression $cmd | Write-Verbose    $cmd = 'certutil.exe -setreg ca\ValidityPeriod "Years"'    Invoke-Expression $cmd | Write-Verbose
 
     #Enable Auditing
     Write-Verbose "Enable Auditing ..."
-    $cmd = 'certutil.exe -setreg ca\AuditFilter 127'
-    Invoke-Expression $cmd | Write-Verbose
+    $cmd = 'certutil.exe -setreg ca\AuditFilter 127'    Invoke-Expression $cmd | Write-Verbose
 
     #Resart Services to apply
     write-verbose "Restarting services to apply changes ..."
@@ -212,7 +192,6 @@ If (($Role -eq "Issue") -and ($IssueStep -eq 2)) {
 
     #Exporting Information
     Write-Verbose "Exporting Information..."
-    $cmd = 'certutil.exe -CRL'
-    Invoke-Expression $cmd | Write-Verbose
+    $cmd = 'certutil.exe -CRL'    Invoke-Expression $cmd | Write-Verbose
 
     }
