@@ -130,7 +130,7 @@ If (($DeployZIPAD) -and ($env:Userdomain -ne $env:COMPUTERNAME)) {
 
     #publish each Cert to AD
     $certs = (Get-ChildItem -Path $Destination\* -Include *.crt).Name
-    For-each $Certfile in $certs {
+    Foreach ($Certfile in $certs) {
         $cmd = 'certutil.exe -dspublish -f "'+$Destination+'\'+$certfile+'" RootCA'
         Invoke-Expression $cmd | Write-Verbose
         $cmd = 'certutil.exe -addstore -f root "'+$Destination+'\'+$certfile+'"'
