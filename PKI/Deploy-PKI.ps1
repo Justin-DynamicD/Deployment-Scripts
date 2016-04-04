@@ -29,6 +29,8 @@
    The functionality that best describes this cmdlet
 #>
 
+#Requires -RunasAdministrator
+
 param (
     [Parameter(Mandatory=$true)][String][ValidateSet("Root","Issue")]$Role,
     [Parameter(Mandatory=$true)][String]$FQDN = "pki.contoso.com",
