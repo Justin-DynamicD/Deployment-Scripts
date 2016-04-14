@@ -36,7 +36,7 @@ param (
     [Parameter(Mandatory=$true)][String]$CAName,
     [Parameter(Mandatory=$true)][pscredential]$RootCredentials,
     [Parameter(Mandatory=$true)][String]$RootServer,
-    [Parameter(Mandatory=$false)][String]$RootName,
+    [Parameter(Mandatory=$true)][String]$RootName,
     #[Parameter(Mandatory=$false)][Int][ValidateSet(1,2)]$IssueStep = 1,
     [Parameter(Mandatory=$false)][Switch]$CreateDeploymentZIP = $false,
     #[Parameter(Mandatory=$false)][Switch]$DeployZIP = $false,
@@ -49,7 +49,20 @@ If (!(Get-Module ServerManager)){
     }
 
 #Test Connectivity to Root Server
+try {
+    #invoke a command to get WinRM service status
+    $RootSession = New-PSSession -ComputerName $RootServer -Credential $RootCredentials -ErrorAction Stop
+    Invoke-Command -Session $RootSession -ScriptBlock {Get-Service | Where-Object {($_.Name -eq "WinRM") -and ($_.Status -eq "Running")}} -ErrorAction Stop | Write-Verbose
+        
+    #success output 
+    Write-Verbose "WinRM connection to the Offline Root Suceeded" 
+    }
+catch{ 
+    #failure output 
+    Write-Error "WinRM is not running or cannnot be validated on $RootServer, please verify connectivity and credentials" -ErrorAction Stop
+    } 
 
+#Build Offline Root Server
 
 #Only process installs if we are on step 1
 If ($IssueStep -eq 1) {
