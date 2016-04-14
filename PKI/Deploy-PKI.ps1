@@ -202,12 +202,12 @@ If (!(Get-Module ServerManager)){
     Import-Module ServerManager
     }
 
-#Test Connectivity to Root Server
+#Test Connectivity to Root Server and check if RootCA is already defined by looking for the CAPolicy.inf file
 try {
     #invoke a command to get WinRM service status
     $RootSession = New-PSSession -ComputerName $RootServer -Credential $RootCredentials -ErrorAction Stop
-    Invoke-Command -Session $RootSession -ScriptBlock {Get-Service | Where-Object {($_.Name -eq "WinRM") -and ($_.Status -eq "Running")}} -ErrorAction Stop | Write-Verbose
-        
+    $RootConfigured = (Invoke-Command -Session $RootSession -ScriptBlock {Test-Path $env:SystemRoot\CAPolicy.inf})
+    
     #success output 
     Write-Verbose "WinRM connection to the Offline Root Suceeded" 
     }
@@ -219,80 +219,70 @@ catch{
 #Copy and update the Policy Files to the Appropriate location
 Write-Verbose "Creating capolicy.inf files ..."
 try {
-    (Get-Content "Root-CAPolicy.inf").replace('[FQDN]',$FQDN) | Set-Content $env:SystemRoot\CAPolicy.inf -force -ErrorAction Stop
-    Send-File -Path $env:SystemRoot\CAPolicy.inf -Destination $env:SystemRoot -Session $RootSession -ErrorAction Stop
+    If (!$RootConfigured) {
+        (Get-Content "Root-CAPolicy.inf").replace('[FQDN]',$FQDN) | Set-Content $env:SystemRoot\CAPolicy.inf -force -ErrorAction Stop
+        Send-File -Path $env:SystemRoot\CAPolicy.inf -Destination $env:SystemRoot -Session $RootSession -ErrorAction Stop
+        }
     (Get-Content "Issue-CAPolicy.inf").replace('[FQDN]',$FQDN) | Set-Content $env:SystemRoot\CAPolicy.inf -force -ErrorAction Stop
     }
 catch {
     Write-Error -Message "Unable to create CAPolicy.inf in the correct location.  Please verify permissions." -ErrorAction Stop
     }
 
-#Build Root Server
-Write-Verbose "Begin installing the Root Server"
-
-####  Below this point is legacy code ####
-
-#Only process installs if we are on step 1
-If ($IssueStep -eq 1) {
-
-    #Install and configure core features
-    Write-Verbose "Installing required features..."
-    Switch ($Role) {
-        Issue {
-            Add-WindowsFeature ADCS-Cert-Authority,ADCS-Web-Enrollment -IncludeManagementTools
-            Install-ADcsCertificationAuthority -CACommonName $CAName -CAType EnterpriseSubordinateCA -CryptoProviderName "RSA#Microsoft Software Key Storage Provider" -Force
-            }
-        Root {
-            Add-WindowsFeature ADCS-Cert-Authority -IncludeManagementTools
-            Install-ADcsCertificationAuthority -CACommonName $CAName -CAType StandaloneRootCA -CryptoProviderName "RSA#Microsoft Software Key Storage Provider" -HashAlgorithmName SHA256 -ValidityPeriod Years -ValidityPeriodUnits 20 -Force
-            }
-        } #end switch
-    } # End "IssueStep 1" Condition
+#Install Missing Roles and Features
+Write-Verbose "Installing required features..."
+#Local CA
+Add-WindowsFeature ADCS-Cert-Authority,ADCS-Web-Enrollment -IncludeManagementTools
+Install-ADcsCertificationAuthority -CACommonName $CAName -CAType EnterpriseSubordinateCA -CryptoProviderName "RSA#Microsoft Software Key Storage Provider" -Force
+#Root CA
+Invoke-Command -Session $RootSession -ScriptBlock {
+        Add-WindowsFeature ADCS-Cert-Authority -IncludeManagementTools
+        Install-ADcsCertificationAuthority -CACommonName $CAName -CAType StandaloneRootCA -CryptoProviderName "RSA#Microsoft Software Key Storage Provider" -HashAlgorithmName SHA256 -ValidityPeriod Years -ValidityPeriodUnits 20 -Force
+        }
 
 #Configure the Root Server
-If ($Role -eq "Root") {
-    
-    #Configure the CRL, CDP and CA Publication URLs
-    Write-Verbose "Setting publication URLs..."
-    $cmd = 'certutil.exe -setreg CA\CRLPublicationURLs "1:'+$env:SystemRoot+'\system32\CertSrv\CertEnroll\%3%8%9.crl\n2:http://'+$FQDN+'/pki/%3%8%9.crl"'
-    Invoke-Expression $cmd | Write-Verbose
-    $cmd = 'certutil.exe -setreg CA\CACertPublicationURLs "1:'+$env:SystemRoot+'\system32\CertSrv\CertEnroll\%1_%3%4.crt\n2:http://'+$FQDN+'/pki/%1_%3%4.crt"'
-    Invoke-Expression $cmd | Write-Verbose
+Write-Verbose "Configuring the Root Server if needed"
+If (!$RootConfigured) {
+    Invoke-Command -Session $RootSession -ScriptBlock {
+        
+        #Configure the CRL, CDP and CA Publication URLs
+        Write-Verbose "Setting publication URLs..."
+        certutil.exe -setreg CA\CRLPublicationURLs "1:$env:SystemRoot\system32\CertSrv\CertEnroll\%3%8%9.crl\n2:http://$FQDN/pki/%3%8%9.crl" | Write-Verbose
+        certutil.exe -setreg CA\CACertPublicationURLs "1:$env:SystemRoot\system32\CertSrv\CertEnroll\%1_%3%4.crt\n2:http://$FQDN/pki/%1_%3%4.crt" | Write-Verbose
 
-    #Configure the CRL Validity Period
-    Write-Verbose "Configure the CRL Validity Period..."
-    $cmd = 'certutil.exe -setreg ca\ValidityPeriodUnits 10'
-    Invoke-Expression $cmd | Write-Verbose
-    $cmd = 'certutil.exe -setreg ca\ValidityPeriod "Years"'
-    Invoke-Expression $cmd | Write-Verbose
+        #Configure the CRL Validity Period
+        Write-Verbose "Configure the CRL Validity Period..."
+        certutil.exe -setreg ca\ValidityPeriodUnits 10 | Write-Verbose
+        certutil.exe -setreg ca\ValidityPeriod "Years" | Write-Verbose
 
-    #Enable Auditing
-    Write-Verbose "Enable Auditing ..."
-    $cmd = 'certutil.exe -setreg ca\AuditFilter 127'
-    Invoke-Expression $cmd | Write-Verbose
+        #Enable Auditing
+        Write-Verbose "Enable Auditing ..."
+        certutil.exe -setreg ca\AuditFilter 127 | Write-Verbose
 
-    #Resart Services to apply
-    write-verbose "Restarting services to apply changes ..."
-    restart-service certsvc
+        #Resart Services to apply
+        write-verbose "Restarting services to apply changes ..."
+        restart-service certsvc
+        
+        #Exporting Information
+        Write-Verbose "Exporting Information..."
+        certutil.exe -CRL | Write-Verbose
+        
+        #Wait for CRL Generation to finish
+        while (!(Test-Path "$env:SystemRoot\system32\CertSrv\CertEnroll\*" -Filter *.crl)) {Start-Sleep 2}
 
-    #Exporting Information
-    Write-Verbose "Exporting Information..."
-    $cmd = 'certutil.exe -CRL'
-    Invoke-Expression $cmd | Write-Verbose
-    
-    #Wait for CRL Generation to finish
-    while (!(Test-Path "$env:SystemRoot\system32\CertSrv\CertEnroll\*" -Filter *.crl)) {Start-Sleep 2}
+        #Create a ZIP of certificate files if switch is set
+        IF ($CreateDeploymentZIP) {
+            Write-Verbose "Creating a ZIP of certificate files..."
+            $source = $env:SystemRoot+'\system32\CertSrv\CertEnroll'
+            $Destination = $env:SystemDrive+'\root-certificates.zip'
+            If(Test-path $destination) {Remove-item $destination}
+            Add-Type -assembly "system.io.compression.filesystem"
+            [io.compression.zipfile]::CreateFromDirectory($Source, $destination) 
+            } # End Zip variable
+        }#End Script Block
+    } # End ConfigureRoot
 
-    #Create a ZIP of certificate files if switch is set
-    IF ($CreateDeploymentZIP) {
-        Write-Verbose "Creating a ZIP of certificate files..."
-        $source = $env:SystemRoot+'\system32\CertSrv\CertEnroll'
-        $Destination = $env:SystemDrive+'\root-certificates.zip'
-        If(Test-path $destination) {Remove-item $destination}
-        Add-Type -assembly "system.io.compression.filesystem"
-        [io.compression.zipfile]::CreateFromDirectory($Source, $destination) 
-        } # End Zip variable
-    } # End Root
+
 
 #If switch $DeployZIPAD is set and we are not in workgroup mode, push all certificates in the zip to AD
 If (($DeployZIPAD) -and ($env:Userdomain -eq $env:COMPUTERNAME)) {Write-Error "cannot publish to AD from a workgroup computer"}
