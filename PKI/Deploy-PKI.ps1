@@ -32,19 +32,24 @@
 #Requires -RunasAdministrator
 
 param (
-    [Parameter(Mandatory=$true)][String][ValidateSet("Root","Issue")]$Role,
     [Parameter(Mandatory=$true)][String]$FQDN = "pki.contoso.com",
     [Parameter(Mandatory=$true)][String]$CAName,
-    [Parameter(Mandatory=$false)][Int][ValidateSet(1,2)]$IssueStep = 1,
-    [Parameter(Mandatory=$false)][Switch]$CreateDeploymentZIP = $true,
-    [Parameter(Mandatory=$false)][Switch]$DeployZIP = $false,
+    [Parameter(Mandatory=$true)][pscredential]$RootCredentials,
+    [Parameter(Mandatory=$true)][String]$RootServer,
+    [Parameter(Mandatory=$false)][String]$RootName,
+    #[Parameter(Mandatory=$false)][Int][ValidateSet(1,2)]$IssueStep = 1,
+    [Parameter(Mandatory=$false)][Switch]$CreateDeploymentZIP = $false,
+    #[Parameter(Mandatory=$false)][Switch]$DeployZIP = $false,
     [Parameter(Mandatory=$false)][Switch]$DeployZIPAD = $false
     )
 
-Write-Verbose "Importing ServerManager is it's not loaded ..."
+Write-Verbose "Importing ServerManager if it's not loaded ..."
 If (!(Get-Module ServerManager)){
     Import-Module ServerManager
     }
+
+#Test Connectivity to Root Server
+
 
 #Only process installs if we are on step 1
 If ($IssueStep -eq 1) {
