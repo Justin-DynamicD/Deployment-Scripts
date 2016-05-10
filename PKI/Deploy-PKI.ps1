@@ -270,23 +270,20 @@ If (!$RootConfigured) {
         #Wait for CRL Generation to finish
         while (!(Test-Path "$env:SystemRoot\system32\CertSrv\CertEnroll\*" -Filter *.crl)) {Start-Sleep 2}
 
-        #Create a ZIP of certificate files if switch is set
-        IF ($CreateDeploymentZIP) {
-            Write-Verbose "Creating a ZIP of certificate files..."
-            $source = $env:SystemRoot+'\system32\CertSrv\CertEnroll'
-            $Destination = $env:SystemDrive+'\root-certificates.zip'
-            If(Test-path $destination) {Remove-item $destination}
-            Add-Type -assembly "system.io.compression.filesystem"
-            [io.compression.zipfile]::CreateFromDirectory($Source, $destination) 
-            } # End Zip variable
+        #Create a ZIP of certificate files
+        Write-Verbose "Creating a ZIP of certificate files..."
+        $source = $env:SystemRoot+'\system32\CertSrv\CertEnroll'
+        $Destination = $env:SystemDrive+'\root-certificates.zip'
+        If(Test-path $destination) {Remove-item $destination}
+        Add-Type -assembly "system.io.compression.filesystem"
+        [io.compression.zipfile]::CreateFromDirectory($Source, $destination) 
+
         }#End Script Block
     } # End ConfigureRoot
 
-
-
 #If switch $DeployZIPAD is set and we are not in workgroup mode, push all certificates in the zip to AD
-If (($DeployZIPAD) -and ($env:Userdomain -eq $env:COMPUTERNAME)) {Write-Error "cannot publish to AD from a workgroup computer"}
-If (($DeployZIPAD) -and ($env:Userdomain -ne $env:COMPUTERNAME)) {
+If ($env:Userdomain -eq $env:COMPUTERNAME) {Write-Error "cannot publish to AD from a workgroup computer"}
+If ($env:Userdomain -ne $env:COMPUTERNAME) {
     
     #Unzip all the certificates to a temp directory
     $Source = $env:SystemDrive+'\root-certificates.zip'
