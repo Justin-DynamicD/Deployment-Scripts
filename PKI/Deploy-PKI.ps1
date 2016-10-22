@@ -1,8 +1,11 @@
-﻿<#
-.Synopsis
+﻿#Requires -Version 5
+#Requires -RunasAdministrator
+
+<#
+.SYNOPSIS
    Deploys a two-tier PKI hierarchy with offline root
 .DESCRIPTION
-   This script will install and configure a two-tier PKI hierarchy complete with offline root.  Becuase of the nature of an offlineroot, the script will be run seperately on each node.
+   This script will install and configure a two-tier PKI hierarchy complete with offline root.  Because of the nature of an offlineroot, the script will be run seperately on each node.
 .EXAMPLE
    Deploy-pki.ps1 –role root –FQDN “pki.contoso.com” –CAName “Contoso Inc.”
 
@@ -29,151 +32,6 @@
    The functionality that best describes this cmdlet
 #>
 
-#Requires -RunasAdministrator
-
-#This Function is used to copy files over Winrm as WMF4 doesn't have a native cmdlet; see notes for credit
-function Send-File
-{
-	<#
-	.SYNOPSIS
-		This function sends a file (or folder of files recursively) to a destination WinRm session. This function was originally
-		built by Lee Holmes (http://poshcode.org/2216) but has been modified to recursively send folders of files as well
-		as to support UNC paths.
-
-	.PARAMETER Path
-		The local or UNC folder path that you'd like to copy to the session. This also support multiple paths in a comma-delimited format.
-		If this is a UNC path, it will be copied locally to accomodate copying.  If it's a folder, it will recursively copy
-		all files and folders to the destination.
-
-	.PARAMETER Destination
-		The local path on the remote computer where you'd like to copy the folder or file.  If the folder does not exist on the remote
-		computer it will be created.
-
-	.PARAMETER Session
-		The remote session. Create with New-PSSession.
-
-	.EXAMPLE
-		$session = New-PSSession -ComputerName MYSERVER
-		Send-File -Path C:\test.txt -Destination C:\ -Session $session
-
-		This example will copy the file C:\test.txt to be C:\test.txt on the computer MYSERVER
-
-	.INPUTS
-		None. This function does not accept pipeline input.
-
-	.OUTPUTS
-		System.IO.FileInfo
-	#>
-	[CmdletBinding()]
-	param
-	(
-		[Parameter(Mandatory)]
-		[ValidateNotNullOrEmpty()]
-		[string[]]$Path,
-		
-		[Parameter(Mandatory)]
-		[ValidateNotNullOrEmpty()]
-		[string]$Destination,
-		
-		[Parameter(Mandatory)]
-		[System.Management.Automation.Runspaces.PSSession]$Session
-	)
-	process
-	{
-		foreach ($p in $Path)
-		{
-			try
-			{
-				if ($p.StartsWith('\\'))
-				{
-					Write-Verbose -Message "[$($p)] is a UNC path. Copying locally first"
-					Copy-Item -Path $p -Destination ([environment]::GetEnvironmentVariable('TEMP', 'Machine'))
-					$p = "$([environment]::GetEnvironmentVariable('TEMP', 'Machine'))\$($p | Split-Path -Leaf)"
-				}
-				if (Test-Path -Path $p -PathType Container)
-				{
-					Write-Log -Source $MyInvocation.MyCommand -Message "[$($p)] is a folder. Sending all files"
-					$files = Get-ChildItem -Path $p -File -Recurse
-					$sendFileParamColl = @()
-					foreach ($file in $Files)
-					{
-						$sendParams = @{
-							'Session' = $Session
-							'Path' = $file.FullName
-						}
-						if ($file.DirectoryName -ne $p) ## It's a subdirectory
-						{
-							$subdirpath = $file.DirectoryName.Replace("$p\", '')
-							$sendParams.Destination = "$Destination\$subDirPath"
-						}
-						else
-						{
-							$sendParams.Destination = $Destination
-						}
-						$sendFileParamColl += $sendParams
-					}
-					foreach ($paramBlock in $sendFileParamColl)
-					{
-						Send-File @paramBlock
-					}
-				}
-				else
-				{
-					Write-Verbose -Message "Starting WinRM copy of [$($p)] to [$($Destination)]"
-					# Get the source file, and then get its contents
-					$sourceBytes = [System.IO.File]::ReadAllBytes($p);
-					$streamChunks = @();
-					
-					# Now break it into chunks to stream.
-					$streamSize = 1MB;
-					for ($position = 0; $position -lt $sourceBytes.Length; $position += $streamSize)
-					{
-						$remaining = $sourceBytes.Length - $position
-						$remaining = [Math]::Min($remaining, $streamSize)
-						
-						$nextChunk = New-Object byte[] $remaining
-						[Array]::Copy($sourcebytes, $position, $nextChunk, 0, $remaining)
-						$streamChunks +=, $nextChunk
-					}
-					$remoteScript = {
-						if (-not (Test-Path -Path $using:Destination -PathType Container))
-						{
-							$null = New-Item -Path $using:Destination -Type Directory -Force
-						}
-						$fileDest = "$using:Destination\$($using:p | Split-Path -Leaf)"
-						## Create a new array to hold the file content
-						$destBytes = New-Object byte[] $using:length
-						$position = 0
-						
-						## Go through the input, and fill in the new array of file content
-						foreach ($chunk in $input)
-						{
-							[GC]::Collect()
-							[Array]::Copy($chunk, 0, $destBytes, $position, $chunk.Length)
-							$position += $chunk.Length
-						}
-						
-						[IO.File]::WriteAllBytes($fileDest, $destBytes)
-						
-						Get-Item $fileDest
-						[GC]::Collect()
-					}
-					
-					# Stream the chunks into the remote script.
-					$Length = $sourceBytes.Length
-					$streamChunks | Invoke-Command -Session $Session -ScriptBlock $remoteScript
-					Write-Verbose -Message "WinRM copy of [$($p)] to [$($Destination)] complete"
-				}
-			}
-			catch
-			{
-				Write-Error $_.Exception.Message
-			}
-		}
-	}
-	
-}#End Function Send-File
-
 param (
     [Parameter(Mandatory=$true)]
     [String]$FQDN,
@@ -197,7 +55,7 @@ param (
     [Switch]$DeployZIPAD = $false
     )
 
-Write-Verbose "Importing ServerManager if it's not loaded ..."
+Write-Output "Importing ServerManager if it's not loaded ..."
 If (!(Get-Module ServerManager)){
     Import-Module ServerManager
     }
@@ -213,24 +71,29 @@ try {
     }
 catch{
     #Failure output
-    Write-Error "WinRM is not running or cannnot be validated on $RootServer, please verify connectivity and credentials" -ErrorAction Stop
+    Write-Error "WinRM is not running or cannnot be validated on $RootServer, please verify connectivity and credentials" -ErrorAction "Stop"
     } 
 
+#If switch $DeployZIPAD is set and we are in workgroup mode, Stop
+If ($DeployZIPAD -and ($env:Userdomain -eq $env:COMPUTERNAME)) {
+    Write-Error "cannot publish to AD from a workgroup computer, but publish was specified" -ErrorAction "Stop"
+    }
+
 #Copy and update the Policy Files to the Appropriate location
-Write-Verbose "Creating capolicy.inf files ..."
+Write-Output "Creating capolicy.inf files ..."
 try {
     If (!$RootConfigured) {
-        (Get-Content "Root-CAPolicy.inf").replace('[FQDN]',$FQDN) | Set-Content $env:SystemRoot\CAPolicy.inf -force -ErrorAction Stop
-        Send-File -Path $env:SystemRoot\CAPolicy.inf -Destination $env:SystemRoot -Session $RootSession -ErrorAction Stop
+        (Get-Content "Root-CAPolicy.inf").replace('[FQDN]',$FQDN) | Set-Content $env:SystemRoot\CAPolicy.inf -force -ErrorAction "Stop"
+        Copy-Item -Path $env:SystemRoot\CAPolicy.inf -Destination $env:SystemRoot -ToSession $RootSession -ErrorAction "Stop"
         }
-    (Get-Content "Issue-CAPolicy.inf").replace('[FQDN]',$FQDN) | Set-Content $env:SystemRoot\CAPolicy.inf -force -ErrorAction Stop
+    (Get-Content "Issue-CAPolicy.inf").replace('[FQDN]',$FQDN) | Set-Content $env:SystemRoot\CAPolicy.inf -force -ErrorAction "Stop"
     }
 catch {
-    Write-Error -Message "Unable to create CAPolicy.inf in the correct location.  Please verify permissions." -ErrorAction Stop
+    Write-Error -Message "Unable to create CAPolicy.inf in the correct location.  Please verify permissions." -ErrorAction "Stop"
     }
 
 #Install Missing Roles and Features
-Write-Verbose "Installing required features..."
+Write-Output "Installing required features..."
 #Local CA
 Add-WindowsFeature ADCS-Cert-Authority,ADCS-Web-Enrollment -IncludeManagementTools
 Install-ADcsCertificationAuthority -CACommonName $CAName -CAType EnterpriseSubordinateCA -CryptoProviderName "RSA#Microsoft Software Key Storage Provider" -Force
@@ -269,64 +132,84 @@ If (!$RootConfigured) {
         
         #Wait for CRL Generation to finish
         while (!(Test-Path "$env:SystemRoot\system32\CertSrv\CertEnroll\*" -Filter *.crl)) {Start-Sleep 2}
-
-        #Create a ZIP of certificate files
-        Write-Verbose "Creating a ZIP of certificate files..."
-        $source = $env:SystemRoot+'\system32\CertSrv\CertEnroll'
-        $Destination = $env:SystemDrive+'\root-certificates.zip'
-        If(Test-path $destination) {Remove-item $destination}
-        Add-Type -assembly "system.io.compression.filesystem"
-        [io.compression.zipfile]::CreateFromDirectory($Source, $destination) 
-
         }#End Script Block
     } # End ConfigureRoot
 
-#If switch $DeployZIPAD is set and we are not in workgroup mode, push all certificates in the zip to AD
-If ($env:Userdomain -eq $env:COMPUTERNAME) {Write-Error "cannot publish to AD from a workgroup computer"}
-If ($env:Userdomain -ne $env:COMPUTERNAME) {
+#Create a fresh copy of the zipFile
+Write-Output "Creating a ZIP of certificate files on $RootServer..."
+Invoke-Command -Session $RootSession -ScriptBlock {
+    $source = $env:SystemRoot+'\system32\CertSrv\CertEnroll'
+    $Destination = $env:SystemDrive+'\root-certificates.zip'
+    If(Test-path $destination) {Remove-item $destination}
+    Add-Type -assembly "system.io.compression.filesystem"
+    [io.compression.zipfile]::CreateFromDirectory($Source, $destination) 
+    }#End Script Block
+
+#Copy Certificates to local CA
+$Source = $env:SystemDrive+'\root-certificates.zip'
+Write-Output "Downloading CA and CRL from $RootServer"
+Copy-Item -Path $source -Destination $env:SystemDrive -FromSession $RootSession -Force -ErrorAction "Stop"
+
+#Extract Conents into a temp folder for processing
+Write-Output "Extracting Contents ..."
+$Destination = $env:SystemDrive+'\temp\certs'
+If(Test-path $destination) {Remove-item $destination -recurse}
+Add-Type -assembly "system.io.compression.filesystem"
+[io.compression.zipfile]::ExtractToDirectory($Source, $destination)
+
+#Push all certificates in the zip to the requested location
+$certs = (Get-ChildItem -Path $Destination\* -Include *.crt).Name
+Foreach ($Certfile in $certs) {
+    If ($DeployZIPAD) {
+        Write-Output "adding $certfile to AD..."
+        certutil.exe -dspublish -f $Destination\$certfile RootCA | Write-Verbose
+        }#End DeployZipAD
     
-    #Unzip all the certificates to a temp directory
+    #X509Certificate2 object that will represent the certificate, then import
+    $CertPrint = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2
+    $certPrint.Import($Destination+'\'+$Certfile)
+
+    #Check to see if Certificate already exists, add if not
+    $match = get-childitem Cert:\LocalMachine\Root | where-object {$_.Thumbprint -eq $CertPrint.Thumbprint}
+    If (!$match) {
+        Write-Output "cannot find $($CertPrint.Thumbprint) in the store, adding..."
+        certutil.exe -addstore -f root $Destination\$certfile | Write-Verbose
+        }
+    }
+
+#cleanup temp directory
+If(Test-path $destination) {Remove-item $destination -recurse}
+
+#If DeployZip is set, unzip files to CertErnoll
+If ($DeployZIP) {
     $Source = $env:SystemDrive+'\root-certificates.zip'
-    $Destination = $env:SystemDrive+'\temp\certs'
-    If(Test-path $destination) {Remove-item $destination -recurse}
+    $Destination = $env:SystemRoot+'\System32\certsrv\CertEnroll'
     Add-Type -assembly "system.io.compression.filesystem"
     [io.compression.zipfile]::ExtractToDirectory($Source, $destination)
+    }
 
-    #publish each Cert to AD
-    $certs = (Get-ChildItem -Path $Destination\* -Include *.crt).Name
-    Foreach ($Certfile in $certs) {
-        $cmd = 'certutil.exe -dspublish -f "'+$Destination+'\'+$certfile+'" RootCA'
-        Invoke-Expression $cmd | Write-Verbose
-        $cmd = 'certutil.exe -addstore -f root "'+$Destination+'\'+$certfile+'"'
-        Invoke-Expression $cmd | Write-Verbose
-        }
- 
-    #cleanup temp directory
-    If(Test-path $destination) {Remove-item $destination -recurse}
+#Create PKI share directory and populate
+Write-Verbose "Creating new $env:SystemDrive\PKI ..."
+new-item -ItemType Directory $env:SystemDrive\PKI\Policy -force
+Copy-Item $env:SystemRoot\System32\certsrv\CertEnroll\* $env:SystemDrive\PKI -Force
+Write-Output "Legal Policy." | Out-File $env:SystemDrive\PKI\Policy\USLegalPolicy.asp
+Write-Output "Limited Use Policy." | Out-File $env:SystemDrive\PKI\Policy\USLimitedUsePolicy.asp
 
-    } #end AD Deployment
+#Update ACLs on PKI Folder
+$ACL = (Get-item $env:SystemDrive\PKI).GetAccessControl('Access')
+$AR = New-Object System.Security.AccessControl.FileSystemAccessRule('BUILTIN\IIS_IUSRS', 'ReadandExecute', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
+$ACL.SetAccessRule($AR)
+Set-Acl -path $env:SystemDrive\PKI -AclObject $ACL
 
-#Configure the Issueing Server on Step 2
+
+
+
+
 If (($Role -eq "Issue") -and ($IssueStep -eq 2)) {
     
-    #Configure the WebEnrollment service
-    Install-AdcsWebEnrollment -Force
 
-    #If DeployZip is set, unzip files to CertErnoll
-    If ($DeployZIP) {
-        $Source = $env:SystemDrive+'\root-certificates.zip'
-        $Destination = $env:SystemRoot+'\System32\certsrv\CertEnroll'
-        Add-Type -assembly "system.io.compression.filesystem"
-        [io.compression.zipfile]::ExtractToDirectory($Source, $destination)
-        }
 
-    #Create PKI share directory and populate
-    Write-Verbose "Creating new $env:SystemDrive\PKI ..."
-    new-item -ItemType Directory $env:SystemDrive\PKI\Policy -force
-    Copy-Item $env:SystemRoot\System32\certsrv\CertEnroll\* $env:SystemDrive\PKI -Force
-    Write-Output "Legal Policy." | Out-File $env:SystemDrive\PKI\Policy\USLegalPolicy.asp
-    Write-Output "Limited Use Policy." | Out-File $env:SystemDrive\PKI\Policy\USLimitedUsePolicy.asp
-
+    
     #Update ACLs on PKI Folder
     $ACL = (Get-item $env:SystemDrive\PKI).GetAccessControl('Access')
     $AR = New-Object System.Security.AccessControl.FileSystemAccessRule('BUILTIN\IIS_IUSRS', 'ReadandExecute', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
