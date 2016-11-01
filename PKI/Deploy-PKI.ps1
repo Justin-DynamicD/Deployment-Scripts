@@ -63,11 +63,17 @@ If (!(Get-Module ServerManager)){
 #Test Connectivity to Root Server and check if RootCA is already defined by looking for the CAPolicy.inf file
 try {
     #invoke a command to get WinRM service status
+    [string]$TrustedHosts = get-item WSMan:\localhost\Client\TrustedHosts
+        If ($TrustedHosts -notcontains $RootServer) {
+            Write-Output "$RootServer does not exist in the TrustedHosts list, adding"
+            If (($TrustedHosts | Measure-Object -Character).Characters -ne 0 ) {$trustedHosts =+",$RootServer"} 
+            Else {$trustedHosts = $RootServer}
+            }
     $RootSession = New-PSSession -ComputerName $RootServer -Credential $RootCredentials -ErrorAction Stop
     $RootConfigured = (Invoke-Command -Session $RootSession -ScriptBlock {Test-Path $env:SystemRoot\CAPolicy.inf})
     
     #success output 
-    Write-Verbose "WinRM connection to the Offline Root Suceeded" 
+    Write-Output "WinRM connection to the Offline Root Suceeded" 
     }
 catch{
     #Failure output
@@ -83,9 +89,11 @@ If ($DeployZIPAD -and ($env:Userdomain -eq $env:COMPUTERNAME)) {
 Write-Output "Creating capolicy.inf files ..."
 try {
     If (!$RootConfigured) {
+        Write-Output "adding CAPolicy to the root server"
         (Get-Content "Root-CAPolicy.inf").replace('[FQDN]',$FQDN) | Set-Content $env:SystemRoot\CAPolicy.inf -force -ErrorAction "Stop"
         Copy-Item -Path $env:SystemRoot\CAPolicy.inf -Destination $env:SystemRoot -ToSession $RootSession -ErrorAction "Stop"
         }
+    Write-Output "adding CAPolicy to the local server"
     (Get-Content "Issue-CAPolicy.inf").replace('[FQDN]',$FQDN) | Set-Content $env:SystemRoot\CAPolicy.inf -force -ErrorAction "Stop"
     }
 catch {
@@ -96,7 +104,7 @@ catch {
 Write-Output "Installing required features..."
 #Local CA
 Add-WindowsFeature ADCS-Cert-Authority,ADCS-Web-Enrollment -IncludeManagementTools
-Install-ADcsCertificationAuthority -CACommonName $CAName -CAType EnterpriseSubordinateCA -CryptoProviderName "RSA#Microsoft Software Key Storage Provider" -Force
+Install-ADcsCertificationAuthority -CACommonName $CAName -CAType EnterpriseSubordinateCA -CryptoProviderName "RSA#Microsoft Software Key Storage Provider" -OutputCertRequestFile $env:SystemDrive\request.req -force
 #Root CA
 Invoke-Command -Session $RootSession -ScriptBlock {
         Add-WindowsFeature ADCS-Cert-Authority -IncludeManagementTools
@@ -104,30 +112,30 @@ Invoke-Command -Session $RootSession -ScriptBlock {
         }
 
 #Configure the Root Server
-Write-Verbose "Configuring the Root Server if needed"
+Write-Output "Configuring the Root Server if needed"
 If (!$RootConfigured) {
     Invoke-Command -Session $RootSession -ScriptBlock {
         
         #Configure the CRL, CDP and CA Publication URLs
-        Write-Verbose "Setting publication URLs..."
+        Write-Output "Setting publication URLs..."
         certutil.exe -setreg CA\CRLPublicationURLs "1:$env:SystemRoot\system32\CertSrv\CertEnroll\%3%8%9.crl\n2:http://$FQDN/pki/%3%8%9.crl" | Write-Verbose
         certutil.exe -setreg CA\CACertPublicationURLs "1:$env:SystemRoot\system32\CertSrv\CertEnroll\%1_%3%4.crt\n2:http://$FQDN/pki/%1_%3%4.crt" | Write-Verbose
 
         #Configure the CRL Validity Period
-        Write-Verbose "Configure the CRL Validity Period..."
+        Write-Output "Configure the CRL Validity Period..."
         certutil.exe -setreg ca\ValidityPeriodUnits 10 | Write-Verbose
         certutil.exe -setreg ca\ValidityPeriod "Years" | Write-Verbose
 
         #Enable Auditing
-        Write-Verbose "Enable Auditing ..."
+        Write-Output "Enable Auditing ..."
         certutil.exe -setreg ca\AuditFilter 127 | Write-Verbose
 
         #Resart Services to apply
-        write-verbose "Restarting services to apply changes ..."
+        Write-Output "Restarting services to apply changes ..."
         restart-service certsvc
         
         #Exporting Information
-        Write-Verbose "Exporting Information..."
+        Write-Output "Exporting CRL..."
         certutil.exe -CRL | Write-Verbose
         
         #Wait for CRL Generation to finish
@@ -149,6 +157,14 @@ Invoke-Command -Session $RootSession -ScriptBlock {
 $Source = $env:SystemDrive+'\root-certificates.zip'
 Write-Output "Downloading CA and CRL from $RootServer"
 Copy-Item -Path $source -Destination $env:SystemDrive -FromSession $RootSession -Force -ErrorAction "Stop"
+
+#Copy request file to RootCA and register
+$target = $env:SystemDrive+'\request.req'
+Write-Output "Sending request file to RootCA and issuing new cert"
+Copy-Item -Path $target -Destination $env:SystemDrive -ToSession $RootSession -Force -ErrorAction "Stop"
+Invoke-Command -Session $RootSession -ScriptBlock {
+    
+    }
 
 #Extract Conents into a temp folder for processing
 Write-Output "Extracting Contents ..."
@@ -177,49 +193,38 @@ Foreach ($Certfile in $certs) {
         }
     }
 
-#cleanup temp directory
-If(Test-path $destination) {Remove-item $destination -recurse}
-
-#If DeployZip is set, unzip files to CertErnoll
-If ($DeployZIP) {
-    $Source = $env:SystemDrive+'\root-certificates.zip'
-    $Destination = $env:SystemRoot+'\System32\certsrv\CertEnroll'
-    Add-Type -assembly "system.io.compression.filesystem"
-    [io.compression.zipfile]::ExtractToDirectory($Source, $destination)
-    }
-
 #Create PKI share directory and populate
-Write-Verbose "Creating new $env:SystemDrive\PKI ..."
-new-item -ItemType Directory $env:SystemDrive\PKI\Policy -force
+Write-Output "Creating new $env:SystemDrive\PKI ..."
+IF (!(Test-Path $env:SystemDrive\PKI\Policy)) {
+    new-item -ItemType Directory $env:SystemDrive\PKI\Policy -force
+    }
+Write-Output "Populating PKI folder with certs and CRLs"
 Copy-Item $env:SystemRoot\System32\certsrv\CertEnroll\* $env:SystemDrive\PKI -Force
+Copy-Item $Destination\* $env:SystemDrive\PKI -Force
 Write-Output "Legal Policy." | Out-File $env:SystemDrive\PKI\Policy\USLegalPolicy.asp
 Write-Output "Limited Use Policy." | Out-File $env:SystemDrive\PKI\Policy\USLimitedUsePolicy.asp
 
 #Update ACLs on PKI Folder
+Write-Output "updating permissions for IIS access"
 $ACL = (Get-item $env:SystemDrive\PKI).GetAccessControl('Access')
 $AR = New-Object System.Security.AccessControl.FileSystemAccessRule('BUILTIN\IIS_IUSRS', 'ReadandExecute', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
 $ACL.SetAccessRule($AR)
 Set-Acl -path $env:SystemDrive\PKI -AclObject $ACL
 
+#cleanup temp directory
+If(Test-path $destination) {Remove-item $destination -recurse}
 
 
 
-
-If (($Role -eq "Issue") -and ($IssueStep -eq 2)) {
-    
+################################## reference below this line
 
 
-    
-    #Update ACLs on PKI Folder
-    $ACL = (Get-item $env:SystemDrive\PKI).GetAccessControl('Access')
-    $AR = New-Object System.Security.AccessControl.FileSystemAccessRule('BUILTIN\IIS_IUSRS', 'ReadandExecute', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
-    $ACL.SetAccessRule($AR)
-    Set-Acl -path $env:SystemDrive\PKI -AclObject $ACL
 
-    #Create the Virtual Directory
-    if (!(Get-WebVirtualDirectory pki)) {
-        New-WebVirtualDirectory -Name pki -PhysicalPath $env:SystemDrive\PKI -Site "Default Web Site"
-        }
+#Create the Virtual Directory
+if (!(Get-WebVirtualDirectory pki)) {
+    New-WebVirtualDirectory -Name pki -PhysicalPath $env:SystemDrive\PKI -Site "Default Web Site"
+    }
+
 
     #Set Hash Algorithm to SHA256
     Write-Verbose "Set Hash Algorithm to SHA256..."
