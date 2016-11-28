@@ -163,7 +163,8 @@ $target = $env:SystemDrive+'\request.req'
 Write-Output "Sending request file to RootCA and issuing new cert"
 Copy-Item -Path $target -Destination $env:SystemDrive -ToSession $RootSession -Force -ErrorAction "Stop"
 Invoke-Command -Session $RootSession -ScriptBlock {
-    
+    certreq.exe -submit -config "$CAName" $target #### this section under development ####
+    certreq.exe -accept
     }
 
 #Extract Conents into a temp folder for processing
