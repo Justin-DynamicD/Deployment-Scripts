@@ -2,7 +2,7 @@
 Signature="$Windows NT$"
 
 [Certsrv_Server]
-RenewalKeyLength=2048
+RenewalKeyLength=4096
 RenewalValidityPeriod=Years
 RenewalValidityPeriodUnits=10
 CRLPeriod=months

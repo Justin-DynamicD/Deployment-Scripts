@@ -65,11 +65,25 @@ If ($IssueStep -eq 1) {
     Switch ($Role) {
         Issue {
             Add-WindowsFeature ADCS-Cert-Authority,ADCS-Web-Enrollment -IncludeManagementTools
-            Install-ADcsCertificationAuthority -CACommonName $CAName -CAType EnterpriseSubordinateCA -CryptoProviderName "RSA#Microsoft Software Key Storage Provider" -Force
+            $Params = @{
+                CACommonName = $CAName
+                CAType = "EnterpriseSubordinateCA"
+                CryptoProviderName = "RSA#Microsoft Software Key Storage Provider"
+                }
+            Install-ADcsCertificationAuthority @Params -Force
             }
         Root {
             Add-WindowsFeature ADCS-Cert-Authority -IncludeManagementTools
-            Install-ADcsCertificationAuthority -CACommonName $CAName -CAType StandaloneRootCA -CryptoProviderName "RSA#Microsoft Software Key Storage Provider" -HashAlgorithmName SHA256 -ValidityPeriod Years -ValidityPeriodUnits 20 -Force
+            $Params = @{
+                CACommonName = $CAName
+                CAType = "StandaloneRootCA"
+                CryptoProviderName = "RSA#Microsoft Software Key Storage Provider"
+                KeyLength = 4096
+                HashAlgorithmName = "SHA256"
+                ValidityPeriod = "Years"
+                ValidityPeriodUnits = 20
+                }
+            Install-ADcsCertificationAuthority @Params -Force
             }
         } #end switch
     } # End "IssueStep 1" Condition
